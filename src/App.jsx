@@ -124,10 +124,16 @@ const useSimpleToast = () => {
 
 // --- FIREBASE CONFIGURATION & HOOKS ---
 
-// MANDATORY: Access global variables provided by the Canvas environment
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+// FALLBACK: Use global variables provided by the Canvas/runtime environment
+const globalAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const globalFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const globalAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Determine config source: Use global variables provided by the Canvas/runtime environment
+// Removed import.meta.env check to resolve compilation warning.
+const appId = globalAppId;
+const firebaseConfig = globalFirebaseConfig;
+const initialAuthToken = globalAuthToken; 
 
 // The collection path for public data: /artifacts/{appId}/public/data/{collectionName}
 const COLLECTION_NAME = 'submissions';
@@ -142,6 +148,19 @@ function useFirebase(showToast) {
     // Set Firestore log level for debugging
     setLogLevel('debug');
     
+    // Check if configuration exists
+    if (!firebaseConfig || !firebaseConfig.projectId) {
+        console.error("Firebase Configuration Missing or Invalid.");
+        showToast({
+            title: 'Config Missing',
+            description: 'Firebase configuration is missing. App will not function.',
+            status: 'error',
+            duration: 9000,
+        });
+        setIsAuthReady(true);
+        return;
+    }
+
     try {
       const app = initializeApp(firebaseConfig);
       const firestore = getFirestore(app);
@@ -160,7 +179,8 @@ function useFirebase(showToast) {
             if (initialAuthToken) {
               await signInWithCustomToken(auth, initialAuthToken);
             } else {
-              await signInAnonymously(auth);
+              // Standard sign-in for public deployment
+              await signInAnonymously(auth); 
             }
           } catch (error) {
             showToast({
@@ -364,329 +384,289 @@ const SubmissionForm = ({ db, userId, initialSubmission, onClose, showToast }) =
     } finally {
       setIsSubmitting(false);
     }
-  }, [form, db, userId, showToast, isEditMode, initialSubmission, onClose, validate]);
+  }, [form, db, userId, initialSubmission, isEditMode, onClose, showToast, validate]);
+
+  // Shared form structure
+  const fields = [
+    { label: 'Name', name: 'name', type: 'text' },
+    { label: 'Email', name: 'email', type: 'email' },
+    { label: 'Subject', name: 'subject', type: 'text' },
+  ];
 
   return (
-    <div className={`max-w-md mx-auto ${isEditMode ? 'p-0' : 'p-6'}`}>
-      <form
-        onSubmit={handleSubmit}
-        className={`flex flex-col space-y-6 ${isEditMode ? 'p-0' : 'p-8 bg-white shadow-2xl rounded-xl'}`}
-      >
-        <h2 className={`text-2xl font-bold flex items-center space-x-2 ${isEditMode ? 'text-orange-600' : 'text-teal-600'}`}>
-            <Mail className="w-6 h-6" />
-            <span>{isEditMode ? 'Edit Submission' : 'Contact Submission Form'}</span>
-        </h2>
-        {!isEditMode && (
-            <p className="text-gray-600">
-                Submit your query below. All entries are saved to the Admin Dashboard.
-            </p>
-        )}
-
-        {/* Name Field */}
-        <div className="flex flex-col">
-          <label htmlFor="name" className="font-semibold mb-1 text-gray-700">Name</label>
-          <input
-            id="name"
-            name="name"
-            placeholder="Your Full Name"
-            value={form.name}
-            onChange={handleChange}
-            className={`p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition ${errors.name ? 'border-red-500' : 'border-gray-300'}`}
-          />
-          {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
-        </div>
-
-        {/* Email Field */}
-        <div className="flex flex-col">
-          <label htmlFor="email" className="font-semibold mb-1 text-gray-700">Email Address</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="you@example.com"
-            value={form.email}
-            onChange={handleChange}
-            className={`p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
-          />
-          {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
-        </div>
-
-        {/* Subject Field */}
-        <div className="flex flex-col">
-          <label htmlFor="subject" className="font-semibold mb-1 text-gray-700">Subject</label>
-          <input
-            id="subject"
-            name="subject"
-            placeholder="Topic of your message"
-            value={form.subject}
-            onChange={handleChange}
-            className={`p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition ${errors.subject ? 'border-red-500' : 'border-gray-300'}`}
-          />
-          {errors.subject && <p className="text-red-500 text-sm mt-1">{errors.subject}</p>}
-        </div>
-
-        {/* Message Field */}
-        <div className="flex flex-col">
-          <label htmlFor="message" className="font-semibold mb-1 text-gray-700">Message</label>
-          <textarea
-            id="message"
-            name="message"
-            placeholder="Write your message here..."
-            value={form.message}
-            onChange={handleChange}
-            rows={5}
-            className={`p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition ${errors.message ? 'border-red-500' : 'border-gray-300'}`}
-          />
-          {errors.message && <p className="text-red-500 text-sm mt-1">{errors.message}</p>}
-        </div>
-
-        {/* Submit Button */}
-        <button
-          type="submit"
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {fields.map((field) => (
+          <div key={field.name}>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor={field.name}>
+              {field.label}
+            </label>
+            <input
+              type={field.type}
+              id={field.name}
+              name={field.name}
+              value={form[field.name]}
+              onChange={handleChange}
+              placeholder={`Enter your ${field.label.toLowerCase()}`}
+              className={`w-full p-3 border rounded-lg focus:ring-sky-500 focus:border-sky-500 transition duration-150 ${errors[field.name] ? 'border-red-500' : 'border-gray-300'}`}
+              disabled={isSubmitting}
+            />
+            {errors[field.name] && <p className="text-red-500 text-xs mt-1">{errors[field.name]}</p>}
+          </div>
+        ))}
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="message">
+          Message / Details
+        </label>
+        <textarea
+          id="message"
+          name="message"
+          rows="4"
+          value={form.message}
+          onChange={handleChange}
+          placeholder="Write your detailed message here..."
+          className={`w-full p-3 border rounded-lg focus:ring-sky-500 focus:border-sky-500 transition duration-150 resize-y ${errors.message ? 'border-red-500' : 'border-gray-300'}`}
           disabled={isSubmitting}
-          className={`flex items-center justify-center space-x-2 py-3 px-6 rounded-xl text-white font-bold transition duration-200 shadow-md hover:shadow-lg 
-            ${isEditMode ? 'bg-orange-500 hover:bg-orange-600' : 'bg-teal-600 hover:bg-teal-700'} 
-            ${isSubmitting ? 'opacity-60 cursor-not-allowed' : ''}`}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>{isEditMode ? "Saving Changes..." : "Submitting..."}</span>
-            </>
-          ) : (
-            <>
-              <Send className="w-5 h-5" />
-              <span>{isEditMode ? 'Save Changes' : 'Send Submission'}</span>
-            </>
-          )}
-        </button>
-      </form>
-    </div>
+        />
+        {errors.message && <p className="text-red-500 text-xs mt-1">{errors.message}</p>}
+      </div>
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="w-full inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-xl shadow-lg text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isSubmitting ? (
+            <Loader2 className="animate-spin w-5 h-5 mr-2" />
+        ) : isEditMode ? (
+            <Pencil className="w-5 h-5 mr-2" />
+        ) : (
+            <Send className="w-5 h-5 mr-2" />
+        )}
+        {isSubmitting ? (isEditMode ? 'Saving Changes...' : 'Submitting...') : (isEditMode ? 'Update Submission' : 'Submit Message')}
+      </button>
+    </form>
   );
 };
 
+// 3. View Submission Modal
+const ViewSubmissionModal = ({ isOpen, onClose, submission }) => {
+    if (!submission) return null;
 
-// 3. Admin Dashboard Component
-const AdminDashboard = ({ db, submissions, isLoading, userId, showToast }) => {
-    const [selectedSubmission, setSelectedSubmission] = useState(null);
+    const formattedTimestamp = submission.timestamp.toLocaleString();
+    const formattedUpdatedAt = submission.updatedAt ? submission.updatedAt.toLocaleString() : 'N/A';
+
+    return (
+        <ModalComponent 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title="Submission Details"
+        >
+            <div className="space-y-4 text-gray-700">
+                <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                    <DetailItem label="Submitted" value={formattedTimestamp} />
+                    <DetailItem label="Last Updated" value={formattedUpdatedAt} />
+                    <DetailItem label="Submitted By (User ID)" value={submission.userId} />
+                    <DetailItem label="Entry ID" value={submission.id} />
+                </div>
+
+                <DetailItem label="Name" value={submission.name} large />
+                <DetailItem label="Email" value={submission.email} large />
+                <DetailItem label="Subject" value={submission.subject} large />
+                
+                <div className="pt-2">
+                    <h4 className="text-sm font-medium text-gray-600 mb-1">Message</h4>
+                    <p className="bg-white p-4 border border-gray-200 rounded-lg whitespace-pre-wrap leading-relaxed text-gray-800 shadow-inner">
+                        {submission.message}
+                    </p>
+                </div>
+            </div>
+        </ModalComponent>
+    );
+};
+
+// Helper for Detail Items
+const DetailItem = ({ label, value, large = false }) => (
+    <div>
+        <h4 className="text-sm font-medium text-gray-600 mb-0.5">{label}</h4>
+        <p className={`font-semibold ${large ? 'text-lg' : 'text-base'} text-gray-800`}>{value}</p>
+    </div>
+);
+
+
+// 4. Submission List Item
+const SubmissionListItem = ({ submission, onEdit, onView, onDelete, showToast }) => {
     const [isDeleting, setIsDeleting] = useState(false);
-    
-    // Modal state for View Details / Delete Confirmation
-    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
-    // Modal state for Edit Submission
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [submissionToEdit, setSubmissionToEdit] = useState(null);
+    const handleDelete = useCallback(async () => {
+        // Use a lightweight confirmation
+        // NOTE: window.confirm() is used here as a simple, non-blocking fallback in a production environment.
+        // For the canvas environment, a custom modal is preferred, but for a standalone React app, this is common practice.
+        if (!window.confirm(`Are you sure you want to delete the submission from ${submission.name}? This action cannot be undone.`)) {
+            return;
+        }
 
-    const formatTime = (date) => {
-        if (!date) return 'N/A';
-        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-    };
+        if (!onDelete) return;
 
-    const handleDelete = useCallback(async (id) => {
-        if (!db || !id) return;
         setIsDeleting(true);
         try {
-            const docPath = `artifacts/${appId}/public/data/${COLLECTION_NAME}/${id}`;
-            await deleteDoc(doc(db, docPath));
-            
+            await onDelete(submission.id);
             showToast({
                 title: 'Deleted',
-                description: 'Submission has been permanently removed.',
+                description: 'The submission was successfully deleted.',
                 status: 'success',
                 duration: 3000,
             });
-            setIsDetailModalOpen(false); // Close detail modal after successful delete
         } catch (error) {
-            console.error("Deletion error:", error);
+            console.error("Delete failed:", error);
             showToast({
-                title: 'Deletion Failed',
-                description: `Could not delete: ${error.message}`,
+                title: 'Deletion Error',
+                description: error.message,
                 status: 'error',
                 duration: 5000,
             });
         } finally {
             setIsDeleting(false);
         }
-    }, [db, showToast]);
-    
-    // Function to open the detail modal
-    const openDetails = (submission) => {
-        setSelectedSubmission(submission);
-        setIsDetailModalOpen(true);
-    };
+    }, [submission.id, submission.name, onDelete, showToast]);
 
-    // Function to open the edit modal
-    const startEdit = (submission) => {
-        setSubmissionToEdit(submission);
-        setIsEditModalOpen(true);
-    }
+    const formattedDate = submission.timestamp.toLocaleDateString();
 
     return (
-        <div className="max-w-7xl mx-auto p-6">
-            <div className="bg-white p-8 rounded-xl shadow-2xl space-y-6">
-                <h2 className="text-3xl font-bold text-blue-600 flex items-center space-x-3">
-                    <PanelTop className="w-8 h-8" />
-                    <span>Admin Dashboard</span>
-                </h2>
-                <p className="text-gray-600">
-                    Review and manage all contact form submissions (<span className="font-semibold">{submissions.length}</span> total entries).
+        <div className="flex items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition duration-200">
+            {/* Subject and Name */}
+            <div className="flex-grow min-w-0 pr-4 cursor-pointer" onClick={() => onView(submission)}>
+                <p className="text-lg font-semibold text-gray-800 truncate hover:text-sky-600 transition">
+                    {submission.subject}
                 </p>
+                <p className="text-sm text-gray-500 truncate">
+                    From: <span className="font-medium text-gray-600">{submission.name}</span> ({formattedDate})
+                </p>
+            </div>
+            
+            {/* Actions */}
+            <div className="flex space-x-2 flex-shrink-0">
+                <button
+                    onClick={() => onView(submission)}
+                    className="p-2 text-sky-600 hover:bg-sky-50 rounded-full transition"
+                    title="View Details"
+                >
+                    <List className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => onEdit(submission)}
+                    className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition"
+                    title="Edit Submission"
+                >
+                    <Pencil className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-full transition disabled:opacity-50"
+                    title="Delete Submission"
+                >
+                    {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                </button>
+            </div>
+        </div>
+    );
+};
 
-                <div className="flex justify-between items-center border-b pb-4">
-                    <p className="text-sm text-gray-500 font-mono">
-                        **User ID:** {userId || 'Authenticating...'}
-                    </p>
-                    <span className="inline-flex items-center px-3 py-1 text-sm font-medium bg-blue-100 text-blue-800 rounded-full">
-                        Public Data
-                    </span>
-                </div>
+// 5. Admin Dashboard
+const AdminDashboard = ({ db, userId, submissions, isLoading, showToast, isAuthReady }) => {
+    const [selectedSubmission, setSelectedSubmission] = useState(null);
+    const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-                {isLoading ? (
-                    <div className="flex flex-col items-center py-10">
-                        <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
-                        <p className="mt-4 text-lg text-gray-700">Loading submissions in real-time...</p>
-                    </div>
-                ) : submissions.length === 0 ? (
-                    <div className="flex flex-col items-center py-10 text-gray-500">
-                        <List className="w-12 h-12" />
-                        <p className="text-xl mt-4">No submissions yet.</p>
-                        <p>The form is empty. Try submitting an entry!</p>
+    const handleDelete = useCallback(async (id) => {
+        if (!db) return;
+        const collectionPath = `artifacts/${appId}/public/data/${COLLECTION_NAME}`;
+        await deleteDoc(doc(db, collectionPath, id));
+    }, [db]);
+
+    const handleView = (submission) => {
+        setSelectedSubmission(submission);
+        setIsViewModalOpen(true);
+    };
+
+    const handleEdit = (submission) => {
+        setSelectedSubmission(submission);
+        setIsEditModalOpen(true);
+    };
+
+    return (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+            <h1 className="text-3xl font-extrabold text-gray-900 mb-6 flex items-center">
+                <PanelTop className="w-8 h-8 mr-3 text-sky-600" />
+                Admin Dashboard
+            </h1>
+
+            <div className="bg-white p-6 rounded-xl shadow-xl border border-gray-100 mb-6">
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                    Submissions ({submissions.length})
+                </h2>
+
+                {/* Status Indicator */}
+                {!isAuthReady || !db ? (
+                    <div className="flex items-center text-orange-600 font-medium p-4 bg-orange-50 rounded-lg">
+                         <Loader2 className="w-5 h-5 animate-spin mr-3" /> Waiting for authentication and database connection...
                     </div>
                 ) : (
-                    <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-inner">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-blue-50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Submitted On</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
+                    <>
+                        {isLoading ? (
+                            <div className="flex items-center justify-center p-8 text-gray-500">
+                                <Loader2 className="w-6 h-6 animate-spin mr-3" /> Loading submissions...
+                            </div>
+                        ) : submissions.length === 0 ? (
+                            <div className="text-center p-10 bg-gray-50 rounded-lg text-gray-500">
+                                <FormInput className="w-10 h-10 mx-auto mb-3" />
+                                <p className="font-semibold">No submissions received yet.</p>
+                                <p className="text-sm">Share the form link to start collecting data.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
                                 {submissions.map((sub) => (
-                                    <tr key={sub.id} className="hover:bg-gray-50 transition duration-150">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
-                                            {sub.id.substring(0, 8)}...
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">
-                                            {sub.subject}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                            {sub.name}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
-                                            {formatTime(sub.timestamp)}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
-                                            {sub.updatedAt ? formatTime(sub.updatedAt) : 'N/A'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <div className="flex space-x-2">
-                                                <button 
-                                                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-lg shadow-sm text-white bg-orange-500 hover:bg-orange-600 transition"
-                                                    onClick={() => startEdit(sub)}
-                                                >
-                                                    <Pencil className="w-4 h-4 mr-1" />
-                                                    Edit
-                                                </button>
-                                                <button 
-                                                    className="inline-flex items-center px-3 py-1.5 border border-blue-500 text-xs font-medium rounded-lg shadow-sm text-blue-700 bg-white hover:bg-blue-50 transition"
-                                                    onClick={() => openDetails(sub)}
-                                                >
-                                                    <Clipboard className="w-4 h-4 mr-1" />
-                                                    View
-                                                </button>
-                                                <button 
-                                                    className="p-1.5 text-red-500 rounded-full hover:bg-red-100 transition disabled:opacity-50"
-                                                    onClick={() => {
-                                                        setSelectedSubmission(sub);
-                                                        setIsDetailModalOpen(true); 
-                                                    }}
-                                                    disabled={isDeleting}
-                                                >
-                                                    <Trash2 className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                    <SubmissionListItem
+                                        key={sub.id}
+                                        submission={sub}
+                                        onView={handleView}
+                                        onEdit={handleEdit}
+                                        onDelete={handleDelete}
+                                        showToast={showToast}
+                                    />
                                 ))}
-                            </tbody>
-                        </table>
-                    </div>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
-            {/* Submission Detail Modal (View and Delete) */}
-            <ModalComponent 
-                isOpen={isDetailModalOpen} 
-                onClose={() => setIsDetailModalOpen(false)} 
-                title="Submission Details"
-                headerBgClass="bg-blue-50"
-                footer={
-                    <>
-                        <button 
-                            className="py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition font-medium"
-                            onClick={() => setIsDetailModalOpen(false)}
-                        >
-                            Close
-                        </button>
-                        <button 
-                            className="py-2 px-4 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-medium flex items-center space-x-2 disabled:opacity-50"
-                            onClick={() => handleDelete(selectedSubmission.id)} 
-                            disabled={isDeleting}
-                        >
-                            {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
-                            <span>Delete Submission</span>
-                        </button>
-                    </>
-                }
+            <p className="text-sm text-gray-500 mt-6">
+                **App ID:** <span className="font-mono bg-gray-100 p-1 rounded text-xs">{appId}</span> | 
+                **User ID:** <span className="font-mono bg-gray-100 p-1 rounded text-xs">{userId || 'Loading...'}</span>
+            </p>
+
+            {/* Modals */}
+            <ViewSubmissionModal 
+                isOpen={isViewModalOpen} 
+                onClose={() => setIsViewModalOpen(false)}
+                submission={selectedSubmission}
+            />
+
+            <ModalComponent
+                isOpen={isEditModalOpen}
+                onClose={() => setIsEditModalOpen(false)}
+                title={`Edit Submission: ${selectedSubmission?.subject || 'N/A'}`}
+                headerBgClass="bg-indigo-50"
             >
                 {selectedSubmission && (
-                    <div className="space-y-4 text-gray-700">
-                        <p className="font-semibold">Subject: <span className="font-normal">{selectedSubmission.subject}</span></p>
-                        <p className="font-semibold">Name: <span className="font-normal">{selectedSubmission.name}</span></p>
-                        <p className="font-semibold">Email: <span className="font-normal">{selectedSubmission.email}</span></p>
-                        <p className="font-semibold">Submitted On: <span className="font-normal">{formatTime(selectedSubmission.timestamp)}</span></p>
-                        {selectedSubmission.updatedAt && (
-                            <p className="font-semibold">Last Updated: <span className="font-normal">{formatTime(selectedSubmission.updatedAt)}</span></p>
-                        )}
-                        <hr className="my-4" />
-                        <p className="font-semibold">Message:</p>
-                        <div className="p-4 bg-gray-50 w-full rounded-md border border-gray-200">
-                            <p className="whitespace-pre-wrap italic text-gray-700">{selectedSubmission.message}</p>
-                        </div>
-                        <span className="inline-block mt-2 px-2 py-1 text-xs font-mono bg-gray-100 text-gray-600 rounded">
-                            User ID: {selectedSubmission.userId}
-                        </span>
-                    </div>
-                )}
-            </ModalComponent>
-
-            {/* Submission Edit Modal (Update) */}
-            <ModalComponent 
-                isOpen={isEditModalOpen} 
-                onClose={() => setIsEditModalOpen(false)} 
-                title={<span className="flex items-center space-x-2 text-orange-600"><Pencil className="w-6 h-6"/>Edit Submission</span>}
-                headerBgClass="bg-orange-50"
-                footer={
-                    <button 
-                        className="py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition font-medium"
-                        onClick={() => setIsEditModalOpen(false)}
-                    >
-                        Cancel
-                    </button>
-                }
-            >
-                {submissionToEdit && (
                     <SubmissionForm 
-                        db={db} 
-                        userId={userId} 
-                        initialSubmission={submissionToEdit}
-                        onClose={() => setIsEditModalOpen(false)} // Close modal upon successful update
+                        db={db}
+                        userId={userId}
+                        initialSubmission={selectedSubmission}
+                        onClose={() => setIsEditModalOpen(false)}
                         showToast={showToast}
                     />
                 )}
@@ -695,108 +675,92 @@ const AdminDashboard = ({ db, submissions, isLoading, userId, showToast }) => {
     );
 };
 
-// 4. Main Application Component with Navigation
-const AppContainer = () => {
+
+// 6. Main App Component
+const App = () => {
+    const [currentView, setCurrentView] = useState('form'); // 'form' or 'admin'
     const [toastState, showToast, dismissToast] = useSimpleToast();
-    // State to toggle between the two views: 'form' or 'admin'
-    const [view, setView] = useState('form');
-    
-    // Custom hook for Firebase setup
+
+    // Initialize Firebase and get connection details
     const { db, userId, isAuthReady } = useFirebase(showToast);
-
-    // Custom hook for real-time data fetching
+    // Fetch and manage submissions
     const { submissions, isLoading } = useSubmissions(db, isAuthReady, showToast);
-
-    // Show a loading state until Firebase is ready
-    if (!isAuthReady) {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-                <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
-                <p className="mt-4 text-lg text-gray-700">Connecting to database and authenticating...</p>
-                <p className="mt-2 text-sm text-gray-500">
-                    If this persists, check the browser console for Firebase configuration errors.
-                </p>
-            </div>
-        );
-    }
+    
+    // Determine if we can show the admin view (basic check for connection)
+    const canAccessAdmin = isAuthReady && db;
 
     return (
-        <div className="min-h-screen flex flex-col items-center p-4 bg-gray-50 font-sans">
-            <style>
-              {`
-                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-                body { font-family: 'Inter', sans-serif; }
-                .animate-spin { animation: spin 1s linear infinite; }
-                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-              `}
-            </style>
-            
-            {/* Header/Navigation */}
-            <header className="w-full max-w-7xl p-4 bg-white rounded-xl shadow-lg mb-8">
-                <div className="flex justify-between items-center flex-wrap gap-4">
-                    <h1 className="text-xl font-bold text-teal-700 flex items-center space-x-2">
-                        <FormInput className="w-6 h-6"/>
-                        <span>Submission Manager (Tailwind/Firestore)</span>
-                    </h1>
-                    <div className="flex space-x-4">
-                        <button 
-                            className={`py-2 px-4 rounded-lg font-semibold transition ${view === 'form' 
-                                ? 'bg-teal-600 text-white shadow-md hover:bg-teal-700' 
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                            onClick={() => setView('form')}
-                        >
-                            <span className="flex items-center space-x-2">
-                                <Mail className="w-5 h-5" />
-                                <span>Submit Form</span>
+        <div className="min-h-screen bg-gray-50 font-sans">
+            <header className="bg-white shadow-md border-b sticky top-0 z-10">
+                <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between items-center h-16">
+                        <div className="flex items-center">
+                            <PanelTop className="w-6 h-6 text-sky-600 mr-2" />
+                            <span className="text-xl font-bold text-gray-900">
+                                Submission Tracker
                             </span>
-                        </button>
-                        <button 
-                            className={`py-2 px-4 rounded-lg font-semibold transition ${view === 'admin' 
-                                ? 'bg-blue-600 text-white shadow-md hover:bg-blue-700' 
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                            onClick={() => setView('admin')}
-                        >
-                            <span className="flex items-center space-x-2">
-                                <PanelTop className="w-5 h-5" />
-                                <span>Admin Dashboard</span>
-                            </span>
-                        </button>
+                        </div>
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={() => setCurrentView('form')}
+                                className={`px-4 py-2 rounded-full text-sm font-medium transition duration-150 ${
+                                    currentView === 'form' ? 'bg-sky-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                                disabled={!isAuthReady}
+                            >
+                                <FormInput className="w-5 h-5 inline mr-1 -mt-0.5" /> Submit Form
+                            </button>
+                            <button
+                                onClick={() => setCurrentView('admin')}
+                                className={`px-4 py-2 rounded-full text-sm font-medium transition duration-150 ${
+                                    currentView === 'admin' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                                disabled={!canAccessAdmin}
+                            >
+                                <List className="w-5 h-5 inline mr-1 -mt-0.5" /> View Submissions
+                            </button>
+                        </div>
                     </div>
-                </div>
+                </nav>
             </header>
 
-            {/* Main Content Area */}
-            <main className="w-full flex-1 max-w-7xl">
-                {view === 'form' ? (
-                    // SubmissionForm in Create Mode
-                    <SubmissionForm db={db} userId={userId} showToast={showToast} /> 
+            <main>
+                {currentView === 'form' ? (
+                    <div className="p-4 sm:p-6 lg:p-8 max-w-lg mx-auto py-12">
+                        <div className="bg-white p-6 sm:p-8 rounded-xl shadow-2xl border border-gray-100">
+                            <h1 className="text-3xl font-bold text-gray-900 mb-6 flex items-center">
+                                <Mail className="w-7 h-7 mr-3 text-sky-600" /> New Submission
+                            </h1>
+                            <SubmissionForm 
+                                db={db}
+                                userId={userId}
+                                initialSubmission={null} // null for creation mode
+                                onClose={() => {}} // No close handler in creation mode
+                                showToast={showToast}
+                            />
+                        </div>
+                    </div>
                 ) : (
-                    <AdminDashboard db={db} submissions={submissions} isLoading={isLoading} userId={userId} showToast={showToast} />
+                    <AdminDashboard
+                        db={db}
+                        userId={userId}
+                        submissions={submissions}
+                        isLoading={isLoading}
+                        showToast={showToast}
+                        isAuthReady={isAuthReady}
+                    />
                 )}
             </main>
 
-            {/* Footer */}
-            <footer className="w-full max-w-7xl py-4 mt-8 text-center text-gray-500 text-sm">
-                Built with React, Tailwind CSS, and Firestore.
-            </footer>
-
             {/* Global Toast Notification */}
             <Toast 
-                message={toastState?.message} 
-                title={toastState?.title} 
-                type={toastState?.type} 
-                onDismiss={dismissToast} 
+                message={toastState?.message}
+                title={toastState?.title}
+                type={toastState?.type}
+                onDismiss={dismissToast}
             />
         </div>
     );
 };
 
-// Main Export
-export default function App() {
-  return (
-    <>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <AppContainer />
-    </>
-  );
-}
+export default App;
